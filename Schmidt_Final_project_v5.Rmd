@@ -1,0 +1,407 @@
+---
+title: "Untitled"
+author: "Laurel Schmidt"
+date: "11/16/2020"
+output: html_document
+---
+
+---
+title: "Association between total screen time and distorted body image in US adolescents"
+author: "Laurel Schmidt"
+date: "11/16/2020"
+output: html_document
+---
+
+##This project uses the Youth Behavior Risk Surveillance (YRBS) 2019 survey data.
+
+```{r}
+#Load libraries
+
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(data.table)
+library(Publish)
+library(dplyr)
+library(car)
+library(lmtest)
+library(caret)
+library(ROCR)
+library(odds.n.ends)
+library(table1)
+
+#Load the data
+YRBS2019 <- read_excel("C:/Users/jacks/Desktop/ADA/Final project/YRBS2019.xlsx")
+
+```
+
+
+```{r}
+
+#Rename variables of interest
+names(YRBS2019)[names(YRBS2019)== "q1"] <- "Age"
+names(YRBS2019)[names(YRBS2019)== "q2"] <- "Sex"
+names(YRBS2019)[names(YRBS2019)== "q3"] <- "Grade"
+names(YRBS2019)[names(YRBS2019)== "q24"] <- "E_bullying"
+names(YRBS2019)[names(YRBS2019)== "q67"] <- "Perceived_Weight"
+names(YRBS2019)[names(YRBS2019)== "q78"] <- "Days_PA"
+names(YRBS2019)[names(YRBS2019)== "q80"] <- "Hours_ST"
+names(YRBS2019)[names(YRBS2019)== "q79"] <- "Hours_TV"
+names(YRBS2019)[names(YRBS2019)== "BMIPCT"] <- "BMI_Pct"
+names(YRBS2019)[names(YRBS2019)== "raceeth"] <- "Race_Eth"
+
+colnames(YRBS2019)
+
+YRBS2019 <- YRBS2019 %>%
+  mutate(Age = case_when(Age %in% c(1) ~ "12", Age %in% c(2) ~ "13", Age %in% c(3) ~ "14", Age %in% c(4) ~ "15", Age %in% c(5) ~ "16", Age %in% c(6) ~ "17", Age %in% c(7) ~ "18")) 
+
+#Convert Age variable to numeric variable
+YRBS2019$Age=parse_number(YRBS2019$Age)
+
+#Recode sex
+YRBS2019$Sex[YRBS2019$Sex==1]<- 0
+YRBS2019$Sex[YRBS2019$Sex==2]<- 1
+##Convert to factor variable and label appropriately
+YRBS2019$Sex<-factor(YRBS2019$Sex, levels=c(0,1), labels=c("Female", "Male"))
+#Relevel so that "Male" is reference category
+YRBS2019$Sex = relevel(YRBS2019$Sex, ref = "Male")
+
+
+#Recode grade to factor variable and label appropriately
+YRBS2019$Grade<-factor(YRBS2019$Grade, levels=c(1:5), labels=c("9th grade", "10th grade", "11th grade", "12 grade", "Ungraded or other grade"))
+
+#Create a new factor variable for race that has fewer categories, as some categories have very few cases in them.
+YRBS2019 <- YRBS2019 %>%
+  mutate(Race_Eth = case_when(Race_Eth %in% c(1) ~ "Other", Race_Eth %in% c(2) ~ "Other", Race_Eth %in% c(3) ~ "Black", Race_Eth %in% c(4) ~ "Other", Race_Eth %in% c(5) ~ "White", Race_Eth %in% c(6) ~ "Hispanic", Race_Eth %in% c(7) ~ "Multiracial", Race_Eth %in% c(8) ~ "Multiracial")) 
+#Convert Race/ethnicity variable to factor variable
+YRBS2019$Race_Eth<-factor(YRBS2019$Race_Eth)
+#Relevel so that "White" is reference category
+YRBS2019$Race_Eth = relevel(YRBS2019$Race_Eth, ref = "White")
+
+#Recode electronic bullying
+YRBS2019$E_bullying[YRBS2019$E_bullying==1]<- 0
+YRBS2019$E_bullying[YRBS2019$E_bullying==2]<- 1
+##Convert to factor variable and label appropriately
+YRBS2019$E_bullying<-factor(YRBS2019$E_bullying, levels=c(0,1), labels=c("Yes", "No"))
+#Relevel so that "No" is reference category
+YRBS2019$E_bullying = relevel(YRBS2019$E_bullying, ref = "No")
+
+#Convert days of physical activity to factor variable following YRBS categorization
+
+YRBS2019 <- YRBS2019 %>%
+  mutate(Days_PA = case_when(Days_PA %in% c(1) ~ "0", Days_PA %in% c(2) ~ "1", Days_PA %in% c(3) ~ "1", Days_PA %in% c(4) ~ "2", Days_PA %in% c(5) ~ "2", Days_PA %in% c(6) ~ "3", Days_PA %in% c(7) ~ "3", Days_PA %in% c(8) ~ "4")) 
+##Convert to factor variable and label appropriately
+YRBS2019$Days_PA<-factor(YRBS2019$Days_PA, levels=c(1:4), labels=c("0 days", "1-2 days", "3-4 days", "5 or more days"))
+#Relevel so that "0 days" is reference category
+YRBS2019$Days_PA = relevel(YRBS2019$Days_PA, ref = "0 days")
+
+#Recode perception of weight status to factor variable and label appropriately
+YRBS2019$Perceived_Weight<-factor(YRBS2019$Perceived_Weight, levels=c(1:5), labels=c("Very underweight", "Slightly underweight", "About the right weight", "Slightly overweight", "Very overweight"))
+
+
+#Recode hours of TV and hours of ST to hours watched per day in numeric variable. 
+
+YRBS2019 <- YRBS2019 %>%
+  mutate(Hours_TV = case_when(Hours_TV %in% c(1) ~ "0", Hours_TV %in% c(2) ~ ".5", Hours_TV %in% c(3) ~ "1", Hours_TV %in% c(4) ~ "2", Hours_TV %in% c(5) ~ "3", Hours_TV %in% c(6) ~ "4", Hours_TV %in% c(7) ~ "5")) 
+
+#Convert Hours of TV variable to numeric variable
+YRBS2019$Hours_TV=parse_number(YRBS2019$Hours_TV)
+
+YRBS2019 <- YRBS2019 %>%
+  mutate(Hours_ST = case_when(Hours_ST %in% c(1) ~ "0", Hours_ST %in% c(2) ~ ".5", Hours_ST %in% c(3) ~ "1", Hours_ST %in% c(4) ~ "2", Hours_ST %in% c(5) ~ "3", Hours_ST %in% c(6) ~ "4", Hours_ST %in% c(7) ~ "5")) 
+
+#Convert Hours of Screen Time variable to numeric variable
+YRBS2019$Hours_ST=parse_number(YRBS2019$Hours_ST)
+
+#Create a new variable combining hours of TV watching and hours of other screen time.
+
+YRBS2019$Total_ST = YRBS2019$Hours_ST + YRBS2019$Hours_TV
+
+
+```
+
+```{r}
+
+#Create dataset using only variables of interest
+
+YRBS<-YRBS2019[c("Race_Eth", "Age", "Sex", "Grade", "E_bullying", "Perceived_Weight", "Total_ST", "Days_PA", "BMI_Pct")]
+
+summary(YRBS)
+
+#Omit cases with missing data to create an analytic dataset. 
+
+YRBS.analytic<-na.omit(YRBS)
+
+
+
+```
+
+```{r}
+
+#Create a new factor variable for BMI category (BMI_Cat), based upon the CDC BMI for-age guidelines and convert BMI_Pct to BMI_Cat
+
+YRBS.analytic$BMI_Cat <- "Underweight"
+YRBS.analytic[which(YRBS.analytic$BMI_Pct>5 & YRBS.analytic$BMI_Pct<85), 'BMI_Cat'] <- "Normal weight"
+YRBS.analytic[which(YRBS.analytic$BMI_Pct>=85 & YRBS.analytic$BMI_Pct<95), 'BMI_Cat'] <- "Overweight"
+YRBS.analytic[which(YRBS.analytic$BMI_Pct>=95), 'BMI_Cat'] <- "Obese"
+YRBS.analytic$BMI_Cat <- as.factor(YRBS.analytic$BMI_Cat)
+
+
+#Convert perceived weight status to match CDC BMI guidelines. "Very underweight" and "slightly underweight" are considered a match to "underweight," "about the right weight" is considered a match to "normal," "slightly overweight" is considered a match to overweight," and "very overweight" is considered a match to "obese." 
+
+YRBS.analytic <- YRBS.analytic %>%
+  mutate(Perceived_Weight = case_when(Perceived_Weight %in% c("Slightly underweight", "Very underweight") ~ "Underweight", Perceived_Weight %in% c("About the right weight") ~ "Normal weight", Perceived_Weight %in% c("Slightly overweight") ~ "Overweight", Perceived_Weight %in% c("Very overweight") ~ "Obese"))
+
+
+#Create a new factor variable for "Distorted body perception," based upon whether a person's perceived weight status matches their BMI category based upon CDC guidelines. This variable contains the following levels: "Perceived weight matches true weight," "Perceived weight is below true weight", and "Perceived weight is above true weight."
+
+YRBS.analytic$Distorted_Percept <- 1
+YRBS.analytic[which(YRBS.analytic$BMI_Cat=="Underweight" & YRBS.analytic$Perceived_Weight=="Underweight"), 'Distorted_Percept'] <- 0
+YRBS.analytic[which(YRBS.analytic$BMI_Cat=="Normal weight" & YRBS.analytic$Perceived_Weight=="Normal weight"), 'Distorted_Percept'] <- 0
+YRBS.analytic[which(YRBS.analytic$BMI_Cat=="Overweight" & YRBS.analytic$Perceived_Weight=="Overweight"), 'Distorted_Percept'] <- 0
+YRBS.analytic[which(YRBS.analytic$BMI_Cat=="Obese" & YRBS.analytic$Perceived_Weight=="Obese"), 'Distorted_Percept'] <- 0
+YRBS.analytic$Distorted_Percept <- factor(YRBS.analytic$Distorted_Percept, labels=c("Normal Body Perception", "Distorted Body Perception"))
+
+
+summary(YRBS.analytic$Distorted_Percept)
+```
+
+```{r}
+#Do a Box Tidwell test to assess assumption of linearity for age and hours of screen time variables.
+
+#Create a log term age variable
+
+YRBS.analytic <- YRBS.analytic %>%
+  mutate(age.x.logage = Age * log(Age))
+
+#Then run a logistic regression with that term to test the assumption of linearity
+
+boxTidwellAge <- glm(Distorted_Percept ~ Age + age.x.logage, data=YRBS.analytic, family="binomial")
+
+summary(boxTidwellAge)
+
+#Because age.x.logage is not significant, the linearity assumption is met for age as the p value exceeds the nominal significance level of p<.05. Age is an appropriate variable for inclusion in this regression model.
+
+#Create a log term total ST variable
+
+YRBS.analytic <- YRBS.analytic %>%
+  mutate(ST.x.logST = Total_ST * log(Total_ST))
+
+#Then run a logistic regression with that term to test the assumption of linearity
+
+boxTidwellST <- glm(Distorted_Percept ~ Total_ST + ST.x.logST, data=YRBS.analytic, family="binomial")
+
+summary(boxTidwellST)
+
+#Because ST.x.logST is not significant, the linearity assumption is met for hours of screen time as the p value exceeds the nominal significance level of p<.05. Hours of screen time is an appropriate variable for inclusion in this regression model.
+
+
+```
+
+
+```{r}
+
+#Run univariate binary logistic regression using screen time as a predictor of distorted body perception. This initial model contains no effect modifiers or potential confounding variables.
+
+BLR_Model1 <- glm(Distorted_Percept ~ Total_ST, data=YRBS.analytic, family="binomial")
+summary(BLR_Model1)
+
+#Calculate and print ORs and 95% CIs  
+ORBLR_Model1 <- exp(cbind(OR = coef(BLR_Model1), confint(BLR_Model1))) 
+ORBLR_Model1 
+
+#AIC is 6470.5
+
+#Hours of screen time is not a significant predictor of distorted body image
+
+
+```
+
+```{r}
+#Consider age as potential effect modifier. 
+
+BLR_Model.age1 <- glm(Distorted_Percept ~ Total_ST + Age, family=binomial, data=YRBS.analytic)
+summary(BLR_Model.age1)
+
+BLR_Model.age2 <- glm(Distorted_Percept ~ Total_ST + Age + Age*Total_ST, family=binomial, data=YRBS.analytic)
+summary(BLR_Model.age1)
+
+
+#Test the hypothesis with the lrtest
+lrtest(BLR_Model.age1, BLR_Model.age2)
+
+
+#The interaction is not significant, so age is not an effect modifier on the relationship between total screentime and distorted body perception.
+
+```
+
+```{r}
+#Consider race/ethnicity as potential effect modifier. 
+
+BLR_Model.race1 <- glm(Distorted_Percept ~ Total_ST +  Age + Race_Eth, family=binomial, data=YRBS.analytic)
+
+
+BLR_Model.race2 <- glm(Distorted_Percept ~ Total_ST +  Age + Race_Eth + Race_Eth*Total_ST, family=binomial, data=YRBS.analytic)
+
+
+#Test the hypothesis with the lrtest
+lrtest(BLR_Model.race1, BLR_Model.race2)
+
+#The interaction is not significant, so race/ethnicity is not an effect modifier on the relationship between total screentime and distorted body perception.
+```
+
+```{r}
+#Add sex as potential effect modifier. 
+
+BLR_Model.sex1 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex, family=binomial, data=YRBS.analytic)
+
+BLR_Model.sex2 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + Sex*Total_ST, family=binomial, data=YRBS.analytic)
+
+lrtest(BLR_Model.sex1, BLR_Model.sex2)
+
+#The interaction is not significant, so sex is not an effect modifier on the relationship between total screentime and distorted body perception.
+
+```
+
+
+```{r}
+
+#Add electronic bullying as potential effect modifier. 
+
+BLR_Model.bullying1 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + E_bullying, family=binomial, data=YRBS.analytic)
+
+
+BLR_Model.bullying2 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + E_bullying + E_bullying*Total_ST, family=binomial, data=YRBS.analytic)
+
+
+lrtest(BLR_Model.bullying1, BLR_Model.bullying2)
+
+#The interaction is not significant, so experience with electronic bullying is not an effect modifier on the relationship between total screentime and distorted body perception.
+
+```
+
+```{r}
+
+#Add days of physical activity as potential effect modifier. 
+
+BLR_Model.PA1 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + Days_PA, family=binomial, data=YRBS.analytic)
+summary(BLR_Model.PA1)
+
+BLR_Model.PA2 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + Days_PA + Days_PA*Total_ST, family=binomial, data=YRBS.analytic)
+
+lrtest(BLR_Model.PA1, BLR_Model.PA2)
+
+#The interaction is not significant, so physical activity is not an effect modifier on the relationship between total screentime and distorted body perception.
+
+```
+
+```{r}
+#Develop final model assessing hours of screen time as a predictor of distorted body perception, controlling for age, race/ethnicity, sex, electronic bullying, and days of physical activity. 
+
+
+BLRModel <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + E_bullying + Days_PA, family=binomial,
+                data=YRBS.analytic)
+summary(BLRModel)
+
+ORBLRModel <- exp(cbind(OR = coef(BLRModel), confint(BLRModel))) 
+ORBLRModel 
+
+
+#ST is statistically significantly associated with distorted body perception when controlling for age, sex, race, experience with electronic bullying, and days of physical activity in the past week.
+
+#AIC is 11359, a substantially worse fit than the uncontrolled model, which had an AIC of 6474.
+
+
+
+```
+
+
+```{r}
+
+
+#Model Diagnostics 
+
+#Check for influential cases using Cook's distance. Cases may be considered influential if they exceed 4/n, or 4/8463 = .00047. 
+
+plot(BLRModel, which=4, id.n=5, col="orange")
+
+#I have opted to remove four cases that have cook's distances in excess of .0005.
+
+
+#Use update function with subset argument to remove top influential cases
+YRBS.outliers.removed <- YRBS.analytic %>% slice(-c(1593, 2994, 5316, 1593))
+summary(YRBS.outliers.removed)
+
+#Create a final model that does not include those four influential cases
+Final.model <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex + E_bullying + Days_PA, family=binomial, data=YRBS.outliers.removed)
+summary(Final.model)
+
+ORFinalModel <- exp(cbind(OR = coef(Final.model), confint(Final.model))) 
+ORFinalModel 
+
+Final.model2 <- glm(Distorted_Percept ~ Total_ST + Age + Race_Eth + Sex, family=binomial, data=YRBS.outliers.removed)
+summary(Final.model2)
+
+ORFinalModel2 <- exp(cbind(OR = coef(Final.model2), confint(Final.model2))) 
+ORFinalModel2 
+
+#The AIC for the model containing the influential cases is 11359. The AIC for the model with these cases removed is 11352, suggesting a model with a very slightly better fit. 
+
+##Test for multicollinearity 
+
+car::vif(Final.model)
+
+#As there are no VIF values close to 10, multicollinearity is not a concern in this model. 
+
+```
+```{r}
+#Model diagnostics continued
+
+#Determine the number of persons with and without distorted body perception predicted by the model
+
+preds <- predict(Final.model, newdata=YRBS.outliers.removed, type='response')
+hist(preds)
+
+
+#Generate a ROC curve 
+
+ROCR=prediction(as.numeric(preds), as.numeric(YRBS.outliers.removed$Distorted_Percept))
+
+perf=performance(ROCR,"tpr", "fpr") 
+plot(perf, colorsize=T, color="red", print.cutoffs.at=seq(0,1,0.1))
+abline(a=0, b= 1) 
+
+#Report the area under curve (AUC)
+auc.perf = performance(ROCR, measure = "auc")
+auc.perf@y.values
+
+#The AUC is 0.5760
+
+
+```
+
+```{r}
+#Create Table 1 - demographic characteristics
+
+label(YRBS.outliers.removed$Age)<-"Age (years)"
+label(YRBS.outliers.removed$Sex)<-"Sex"
+label(YRBS.outliers.removed$Grade)<-"Grade"
+label(YRBS.outliers.removed$Race_Eth)<-"Race/Ethnicity"
+
+table1(~Age + Sex + Grade + Race_Eth|Distorted_Percept,
+       overall="Total", rowlabelhead="Variable", footnote='SD = standard deviation', YRBS.outliers.removed)
+
+#Create table 2 - non-demographic covariates
+
+label(YRBS.outliers.removed$Age)<-"Age (years)"
+label(YRBS.outliers.removed$Sex)<-"Sex"
+label(YRBS.outliers.removed$Race_Eth)<-"Race/Ethnicity"
+label(YRBS.outliers.removed$E_bullying)<-"Experience with Electronic Bullying"
+label(YRBS.outliers.removed$Days_PA)<-"Days of Physical Activity"
+label(YRBS.outliers.removed$Total_ST)<-"Hours of Screentime"
+label(YRBS.outliers.removed$Distorted_Percept)<-"Distorted Body Perception"
+table1(~Age + Sex + Race_Eth + Days_PA + E_bullying + Total_ST|Distorted_Percept,
+       overall="Total", rowlabelhead="Variable", footnote='SD = standard deviation', YRBS.outliers.removed)
+```
+
+
